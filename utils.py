@@ -176,7 +176,7 @@ def statistical_parity(y, y_, Z, priv=None):
         counts = [np.mean(y[Z == z]) for z in values]
         priv = values[np.argmax(counts)]
         unpriv = [z for z in values if z != priv]
-        print('Automatic priviledged value is', priv)
+        print('[{}]'.format(priv), end=' ')
     else:
         unpriv = [z for z in values if z != priv]
 
@@ -190,7 +190,7 @@ def average_odds(y, y_, Z, priv=None):
         counts = [np.mean(y[Z == z]) for z in values]
         priv = values[np.argmax(counts)]
         unpriv = [z for z in values if z != priv]
-        print('Automatic priviledged value is', priv)
+        print('[{}]'.format(priv), end=' ')
     else:
         unpriv = [z for z in values if z != priv]
 
@@ -207,7 +207,7 @@ def average_predictive_value(y, y_, Z, priv=None):
         counts = [np.mean(y[Z == z]) for z in values]
         priv = values[np.argmax(counts)]
         unpriv = [z for z in values if z != priv]
-        print('Automatic priviledged value is', priv)
+        print('[{}]'.format(priv), end=' ')
     else:
         unpriv = [z for z in values if z != priv]
 

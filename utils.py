@@ -1,5 +1,8 @@
 import pandas as pd
 import numpy as np
+import itertools
+
+from sklearn.base import BaseEstimator, TransformerMixin, MetaEstimatorMixin
 
 
 def read_diabetes_dataset(binary = False):
@@ -180,3 +183,146 @@ def read_diabetes_dataset(binary = False):
     X = data.drop(['readmitted'], axis=1)
     
     return X, y
+
+
+
+def statistical_parity(y, y_, Z, priv=None):
+  if priv is None:
+    values = np.unique(Z)
+    counts = [np.mean(y[Z==z]) for z in values]
+    priv = values[np.argmax(counts)]
+    unpriv = [z for z in values if z != priv]
+    print('Automatic priviledged value is', priv)
+  else:
+    unpriv = [z for z in values if z != priv]
+  
+  return np.array([np.mean([y_i for y_i, zi in zip(y_, Z) if zi == unp]) - np.mean([y_i for y_i, zi in zip(y_, Z) if zi == priv])
+                   for unp in unpriv])
+
+def average_odds(y, y_, Z, priv=None):
+  if priv is None:
+    values = np.unique(Z)
+    counts = [np.mean(y[Z==z]) for z in values]
+    priv = values[np.argmax(counts)]
+    unpriv = [z for z in values if z != priv]
+    print('Automatic priviledged value is', priv)
+  else:
+    unpriv = [z for z in values if z != priv]
+  
+  return np.array([1/2*(np.mean([y_i for y_i, yi, zi in zip(y_, y, Z) if zi == unp and yi == 1]) - 
+                           np.mean([y_i for y_i, yi, zi in zip(y_, y, Z) if zi == priv  and yi == 1]))+\
+                   1/2*(np.mean([y_i for y_i, yi, zi in zip(y_, y, Z) if zi == unp and yi == 0]) - 
+                           np.mean([y_i for y_i, yi, zi in zip(y_, y, Z) if zi == priv  and yi == 0]))
+                   for unp in unpriv])
+  
+def average_predictive_value(y, y_, Z, priv=None):
+  if priv is None:
+    values = np.unique(Z)
+    counts = [np.mean(y[Z==z]) for z in values]
+    priv = values[np.argmax(counts)]
+    unpriv = [z for z in values if z != priv]
+    print('Automatic priviledged value is', priv)
+  else:
+    unpriv = [z for z in values if z != priv]
+  
+  return np.array([1/2*(np.mean([yi for y_i, yi, zi in zip(y_, y, Z) if zi == unp and y_i == 1]) - 
+                           np.mean([yi for y_i, yi, zi in zip(y_, y, Z) if zi == priv  and y_i == 1]))+\
+                   1/2*(np.mean([yi for y_i, yi, zi in zip(y_, y, Z) if zi == unp and y_i == 0]) - 
+                           np.mean([yi for y_i, yi, zi in zip(y_, y, Z) if zi == priv  and y_i == 0]))
+                   for unp in unpriv])
+  
+def consistency(X, y_, k, distance=lambda x: np.linalg.norm(x, 1)):
+  D_matrix = np.array([[distance(xi-xj) for xj in X] for xi in X])
+  N = np.argsort(D_matrix+np.eye(D_matrix.shape[0])*10**10, axis=0)[:, :k]
+  i_consist = [abs(y_[i]-np.mean([y_[N[i,j]] for j in range(k)])) for i in range(y_.shape[0])]
+  return 1 - np.mean(i_consist)
+
+def theil_index(y, y_):
+  b = (1-y+y_)/2
+  b_ = np.mean(b)
+  return np.mean(b/b_*np.log(b/b_+10**-10))
+
+
+class CounterfactualPreProcessing(MetaEstimatorMixin, BaseEstimator):
+    def __init__(self, estimator, sensitive_feature_ids):
+        self.estimator = estimator
+        self.sensitive_feature_ids = sensitive_feature_ids
+
+    def fit(self, X, y):
+      sensitive_columns = X[:, self.sensitive_feature_ids]
+      self.unique_values = []
+      for scol in sensitive_columns.T:
+        self.unique_values+=[np.unique(scol).tolist()]
+      
+      X_rows = []
+      y_rows = []
+      
+      for xi, yi in zip(X, y):
+        for comb in itertools.product(*self.unique_values):
+          comb = np.array(comb)
+          xi[self.sensitive_feature_ids] = comb
+          X_rows+=[xi.copy()]
+          y_rows+= [yi]
+              
+      X_transf = np.array(X_rows)
+      y_transf = np.array(y_rows)
+
+      print(X_transf.shape, y_transf.shape)
+
+      self.estimator.fit(X_transf, y_transf)
+      return self
+    
+    def predict(self, X):
+      return self.estimator.predict(X)
+      
+    def predict_proba(self, X):
+      return self.estimator.predict_proba(X)
+
+
+class Weighted(MetaEstimatorMixin, BaseEstimator):
+  def __init__(self, estimator, sensitive_feature_ids):
+    self.estimator = estimator
+    self.sensitive_feature_ids = sensitive_feature_ids
+
+  def fit(self, X, y):
+    sensitive_columns = X[:, self.sensitive_feature_ids]
+    sensitive_columns_y = np.append(X[:, self.sensitive_feature_ids], y[:, np.newaxis], axis=1)
+    
+    unique_feats = []
+    for scol in sensitive_columns.T:
+      unique_feats+=[np.unique(scol).tolist()]
+    unique_y = np.unique(y).tolist()
+    
+    unique_feats_y = []
+    for scol in sensitive_columns_y.T:
+      unique_feats_y+=[np.unique(scol).tolist()]
+      
+    self.unique_values = []
+    for scol in sensitive_columns.T:
+      self.unique_values+=[np.unique(scol).tolist()]
+    self.unique_values+=[np.unique(y).tolist()]
+    
+    sample_weight = np.ones(sensitive_columns_y.shape[0])
+    for comb in itertools.product(*unique_feats):
+      comb = np.array(comb)
+      where = np.prod(sensitive_columns == comb, axis=1)!=0
+      sample_weight[where] *= np.mean(np.prod(sensitive_columns == comb, axis=1))
+    
+    for comb in itertools.product(*[unique_y]):
+      comb = np.array(comb)
+      where = (y == comb[0])
+      sample_weight[where] *= np.mean(y == comb[0])
+      
+    for comb in itertools.product(*unique_feats_y):
+      comb = np.array(comb)
+      where = np.prod(sensitive_columns_y == comb, axis=1)!=0
+      sample_weight[where] /= np.mean(np.prod(sensitive_columns_y == comb, axis=1))
+    
+    self.estimator.fit(X, y, sample_weight=sample_weight)
+    return self
+  
+  def predict(self, X):
+    return self.estimator.predict(X)
+    
+  def predict_proba(self, X):
+    return self.estimator.predict_proba(X)

@@ -5,7 +5,7 @@ import itertools
 from sklearn.base import BaseEstimator, MetaEstimatorMixin
 
 
-def read_diabetes_dataset(binary=False):
+def read_diabetes_dataset(binary=False, use_paper_setup=False):
     # Read the dataset
     data = pd.read_csv('diabetic_data.csv')
 
@@ -14,12 +14,15 @@ def read_diabetes_dataset(binary=False):
 
     # Remove Uninformative Features
     # the uninformative features in the dataset (21 in total) were discarded as shown in the table below, due to either, a huge amount of missing sample values (>50%), or due to the fact that somefeatures are not relevant to classify the data towards our target (Like patient ID), or if the feature is compeletly unbalanced (>95% of data points have the same value for the feature).
-    features_drop_list = ['encounter_id', 'patient_nbr', 'weight', 'payer_code', 'medical_specialty', 'repaglinide', 'nateglinide', 'chlorpropamide', 'acarbose', 'miglitol', 'troglitazone', 'tolazamide',
+    # features_drop_list = ['encounter_id', 'patient_nbr', 'weight',  'payer_code', 'medical_specialty', 'repaglinide', 'nateglinide', 'chlorpropamide', 'acarbose', 'miglitol', 'troglitazone', 'tolazamide',
+    #                       'examide', 'citoglipton', 'glyburide-metformin', 'glipizide-metformin', 'glimepiride-pioglitazone', 'metformin-rosiglitazone', 'metformin-pioglitazone', 'acetohexamide', 'tolbutamide']
+    features_drop_list = ['encounter_id', 'patient_nbr', 'payer_code', 'medical_specialty', 'repaglinide', 'nateglinide', 'chlorpropamide', 'acarbose', 'miglitol', 'troglitazone', 'tolazamide',
                           'examide', 'citoglipton', 'glyburide-metformin', 'glipizide-metformin', 'glimepiride-pioglitazone', 'metformin-rosiglitazone', 'metformin-pioglitazone', 'acetohexamide', 'tolbutamide']
     data = data.drop(features_drop_list, axis=1)
 
     # Remove nan values
     data = data.replace(" ?", np.nan)
+    # data = data.replace("?", np.nan)
     data = data.dropna().reset_index(drop=True)
 
     # start by setting all values containing E or V into 0 (as one category)
@@ -118,6 +121,23 @@ def read_diabetes_dataset(binary=False):
     for i in range(0, 10):
         data['age'] = data['age'].replace(
             '['+str(10*i)+'-'+str(10*(i+1))+')', i*10+5)
+        
+    # Replace weight categories
+    # data['weight'] = data['weight'].replace("[0-25)", 25)
+    # data['weight'] = data['weight'].replace("[25-50)", 50)
+    # data['weight'] = data['weight'].replace("[50-75)", 75)
+    # data['weight'] = data['weight'].replace("[75-100)", 100)
+    # data['weight'] = data['weight'].replace("[100-125)", 125)
+    # data['weight'] = data['weight'].replace("[125-150)", 150)
+    # data['weight'] = data['weight'].replace("[150-175)", 175)
+    # data['weight'] = data['weight'].replace("[175-200)", 200)
+    # data['weight'] = data['weight'].replace(">200", 250)
+    
+    data.loc[:,"weight"] = data["weight"].replace("?",0)
+    data.loc[:,"weight"] = data["weight"].replace("\>|\[|\-.*","",regex=True).astype("float")
+    # data['weight'] = data['weight'].replace("?", -1)
+    
+    
 
     # Replace by 4 numerical categories
     data['max_glu_serum'] = data['max_glu_serum'].replace("None", 0)
@@ -148,6 +168,17 @@ def read_diabetes_dataset(binary=False):
     # Convert diabetesMed into binary representation
     data['diabetesMed'] = data['diabetesMed'].replace('Yes', 1)
     data['diabetesMed'] = data['diabetesMed'].replace('No', 0)
+    
+    
+    data['admission_type_id'] = data['admission_type_id'].apply(lambda x : 1 if int(x) in [2, 7]
+                                                            else ( 5 if int(x) in [6, 8]
+                                                            else int(x) ))
+
+    data['admission_source_id'] = data['admission_source_id'].apply(lambda x : 1 if int(x) in [2, 3]
+                                                                else ( 4 if int(x) in [5, 6, 10, 22, 25]
+                                                                else ( 9 if int(x) in [15, 17, 20, 21]
+                                                                else ( 11 if int(x) in [13, 14]
+                                                                else int(x) ))))
 
     # Race into binary categories
     data = pd.concat([data, pd.get_dummies(
@@ -166,7 +197,34 @@ def read_diabetes_dataset(binary=False):
     # Divide labels and features
     y = data['readmitted']
     X = data.drop(['readmitted'], axis=1)
-
+    
+    if use_paper_setup:
+        X = X.drop([
+            'num_medications',
+            'number_outpatient',
+            'number_emergency',
+            'number_inpatient',
+            'diag_1',
+            'diag_2',
+            'diag_3',
+            'number_diagnoses',
+            'metformin',
+            'glimepiride',
+            'glipizide',
+            'glyburide',
+            'pioglitazone',
+            'rosiglitazone',
+            'insulin',
+            'change',
+        ], axis=1)
+        
+    # else:
+    X = X.drop([
+        'race_AfricanAmerican',
+        'race_Asian',
+        'race_Hispanic',
+        'race_Other',
+    ], axis=1)
     return X, y
 
 
@@ -182,6 +240,19 @@ def statistical_parity(y, y_, Z, priv=None):
 
     return np.array([np.mean([y_i for y_i, zi in zip(y_, Z) if zi == unp]) - np.mean([y_i for y_i, zi in zip(y_, Z) if zi == priv])
                      for unp in unpriv])
+
+def disparate_impact(y, Z, priv):
+    priv_idx = np.array([np.array_equal(arr, priv) for arr in Z])
+    unpriv_idx = np.invert(priv_idx)
+    
+    num_positive_unpriv = np.count_nonzero(y[unpriv_idx])
+    num_inst_unpriv = np.count_nonzero(len(y[unpriv_idx]))
+    
+    num_positive_priv = np.count_nonzero(y[priv_idx])
+    num_inst_priv = np.count_nonzero(len(y[priv_idx]))
+    
+    
+    return (num_positive_unpriv / num_inst_unpriv) / (num_positive_priv / num_inst_priv) 
 
 
 def average_odds(y, y_, Z, priv=None):

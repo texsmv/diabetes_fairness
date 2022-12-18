@@ -183,6 +183,14 @@ def read_diabetes_dataset(binary=False, use_paper_setup=False):
     # Race into binary categories
     data = pd.concat([data, pd.get_dummies(
         data['race'], prefix='race')], axis=1).drop(['race'], axis=1)
+    
+    # discharge_disposition_id to binary categories
+    data = pd.concat([data, pd.get_dummies(
+        data['discharge_disposition_id'], prefix='discharge')], axis=1).drop(['discharge_disposition_id'], axis=1)
+
+    # admission_source_id to binary categories
+    data = pd.concat([data, pd.get_dummies(
+        data['admission_source_id'], prefix='admission')], axis=1).drop(['admission_source_id'], axis=1)
 
     # Convert readmitted into numerical representation
     if binary:
